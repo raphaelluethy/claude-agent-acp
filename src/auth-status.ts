@@ -210,7 +210,7 @@ export function fromCliStatus(stdout: string, apiKeyHelper?: string): AuthStatus
   if (!externalBackend && !status.loggedIn && !status.apiKeySource) {
     return notLoggedInAuthStatus();
   }
-  return mapAuthFields({
+  const mapped = mapAuthFields({
     apiProvider: status.apiProvider,
     subscriptionType: status.subscriptionType,
     apiKeySource: status.apiKeySource,
@@ -218,6 +218,10 @@ export function fromCliStatus(stdout: string, apiKeyHelper?: string): AuthStatus
     organization: status.orgName,
     apiKeyHelper,
   });
+  if (mapped.kind === "none" && status.loggedIn && status.authMethod === "oauth_token") {
+    return { kind: "account", label: "Claude subscription", detail: "OAuth token" };
+  }
+  return mapped;
 }
 
 /** Single mapping table shared by both sources; see the `kind`/`label` table in
