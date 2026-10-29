@@ -1005,10 +1005,18 @@ describe("createSession options merging", () => {
 
   describe("CLAUDE_MODEL_CONFIG", () => {
     let originalModelConfig: string | undefined;
+    let originalClaudeConfigDir: string | undefined;
+    let configDir: string;
+    // Added to every session's settings; with no installed or enabled plugins
+    // in the empty CLAUDE_CONFIG_DIR, `enabledPlugins` is empty.
+    const noPlugins = { enabledPlugins: {}, syncClaudeAiPlugins: false };
 
     beforeEach(() => {
       originalModelConfig = process.env.CLAUDE_MODEL_CONFIG;
       delete process.env.CLAUDE_MODEL_CONFIG;
+      originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+      configDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-acp-model-config-"));
+      process.env.CLAUDE_CONFIG_DIR = configDir;
     });
 
     afterEach(() => {
@@ -1017,6 +1025,12 @@ describe("createSession options merging", () => {
       } else {
         delete process.env.CLAUDE_MODEL_CONFIG;
       }
+      if (originalClaudeConfigDir !== undefined) {
+        process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+      } else {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      }
+      fs.rmSync(configDir, { recursive: true, force: true });
     });
 
     it("passes modelOverrides as settings", async () => {
@@ -1028,6 +1042,7 @@ describe("createSession options merging", () => {
 
       expect(capturedOptions!.settings).toEqual({
         modelOverrides: { "claude-opus-4-6": "us.anthropic.claude-opus-4-6-v1" },
+        ...noPlugins,
       });
     });
 
@@ -1040,6 +1055,7 @@ describe("createSession options merging", () => {
 
       expect(capturedOptions!.settings).toEqual({
         availableModels: ["opus", "sonnet"],
+        ...noPlugins,
       });
     });
 
@@ -1054,13 +1070,14 @@ describe("createSession options merging", () => {
       expect(capturedOptions!.settings).toEqual({
         modelOverrides: { "claude-opus-4-6": "us.anthropic.claude-opus-4-6-v1" },
         availableModels: ["opus"],
+        ...noPlugins,
       });
     });
 
-    it("does not add settings when env var is not set", async () => {
+    it("adds only the plugin settings when env var is not set", async () => {
       await agent.newSession({ cwd: process.cwd(), mcpServers: [] });
 
-      expect(capturedOptions!.settings).toBeUndefined();
+      expect(capturedOptions!.settings).toEqual(noPlugins);
     });
 
     it("keeps model settings when session settings add hooks", async () => {
@@ -1080,6 +1097,7 @@ describe("createSession options merging", () => {
         modelOverrides: { "claude-opus-4-6": "us.anthropic.claude-opus-4-6-v1" },
         availableModels: ["opus"],
         hooks,
+        ...noPlugins,
       });
       // The CLI adds these hooks to the ones in the user and project settings.
       expect(capturedOptions!.settingSources).toEqual(["user", "project", "local"]);
@@ -1099,7 +1117,7 @@ describe("createSession options merging", () => {
       });
 
       expect(capturedOptions!.resume).toBe(sessionId);
-      expect(capturedOptions!.settings).toEqual({ availableModels: ["opus"], hooks });
+      expect(capturedOptions!.settings).toEqual({ availableModels: ["opus"], hooks, ...noPlugins });
     });
 
     it("merges model settings with a session settings file", async () => {
@@ -1118,6 +1136,7 @@ describe("createSession options merging", () => {
         expect(capturedOptions!.settings).toEqual({
           availableModels: ["opus"],
           hooks: { Stop: [] },
+          ...noPlugins,
         });
       } finally {
         fs.rmSync(settingsDir, { recursive: true });
@@ -1149,6 +1168,7 @@ describe("createSession options merging", () => {
         model: "claude-sonnet-4-6",
         modelOverrides: { "claude-opus-4-6": "meta-value" },
         availableModels: ["opus"],
+        ...noPlugins,
       });
     });
 
@@ -1156,6 +1176,75 @@ describe("createSession options merging", () => {
       process.env.CLAUDE_MODEL_CONFIG = "not-json";
 
       await expect(agent.newSession({ cwd: process.cwd(), mcpServers: [] })).rejects.toThrow();
+    });
+  });
+
+  describe("plugins", () => {
+    let originalClaudeConfigDir: string | undefined;
+    let configDir: string;
+
+    beforeEach(() => {
+      originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+      configDir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-acp-plugins-"));
+      process.env.CLAUDE_CONFIG_DIR = configDir;
+    });
+
+    afterEach(() => {
+      if (originalClaudeConfigDir !== undefined) {
+        process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+      } else {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      }
+      fs.rmSync(configDir, { recursive: true, force: true });
+    });
+
+    it("disables installed plugins and ones enabled in user or client settings", async () => {
+      fs.mkdirSync(path.join(configDir, "plugins"));
+      fs.writeFileSync(
+        path.join(configDir, "plugins", "installed_plugins.json"),
+        JSON.stringify({ version: 2, plugins: { "delta@zed-industries": [] } }),
+      );
+      fs.writeFileSync(
+        path.join(configDir, "settings.json"),
+        JSON.stringify({ enabledPlugins: { "formatter@anthropic-tools": true } }),
+      );
+
+      await agent.newSession({
+        cwd: process.cwd(),
+        mcpServers: [],
+        _meta: {
+          claudeCode: { options: { settings: { enabledPlugins: { "client@market": true } } } },
+        },
+      });
+
+      expect(capturedOptions!.settings).toEqual({
+        enabledPlugins: {
+          "client@market": false,
+          "delta@zed-industries": false,
+          "formatter@anthropic-tools": false,
+        },
+        syncClaudeAiPlugins: false,
+      });
+    });
+
+    it("drops plugins a client passes in options, extraArgs or env", async () => {
+      await agent.newSession({
+        cwd: process.cwd(),
+        mcpServers: [],
+        _meta: {
+          claudeCode: {
+            options: {
+              plugins: [{ type: "local", path: "./my-plugin" }],
+              extraArgs: { "plugin-dir": "./other-plugin", verbose: null },
+              env: { CLAUDE_CODE_PLUGIN_DIRS: "./env-plugin" },
+            },
+          },
+        },
+      });
+
+      expect(capturedOptions!.plugins).toEqual([]);
+      expect(capturedOptions!.extraArgs).toEqual({ verbose: null, "replay-user-messages": "" });
+      expect(capturedOptions!.env?.CLAUDE_CODE_PLUGIN_DIRS).toBeUndefined();
     });
   });
 

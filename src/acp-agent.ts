@@ -230,6 +230,7 @@ import {
 } from "./permissions/presentation.js";
 import { decodeClaudePermissionResponse } from "./permissions/response.js";
 import { SettingsManager } from "./settings.js";
+import { pluginsDisabledSettings, withoutPluginDirArg } from "./plugins.js";
 import {
   activeUsageLimitMessage,
   airSessionFailureCapabilityMeta,
@@ -11712,16 +11713,25 @@ export class ClaudeAcpAgent {
     // Claude Code applies env from settings.json after the subprocess env. Put
     // an active ACP route in the programmatic settings tier too so user/project
     // settings cannot silently restore a different ANTHROPIC_BASE_URL.
-    const settings = resolvedProvider
+    const sessionSettings = resolvedProvider
       ? {
           ...configuredSettingsObject,
           apiKeyHelper: "",
           env: { ...configuredSettingsObject?.env, ...providerEnv },
         }
       : configuredSettingsObject;
+    // ACP sessions run without plugins: neither installed or claude.ai-synced
+    // ones nor ones a client enables through `_meta` settings.
+    const settings: Settings = {
+      ...sessionSettings,
+      ...(await pluginsDisabledSettings(params.cwd, sessionSettings)),
+    };
     const env = {
       ...process.env,
       ...userProvidedOptions?.env,
+      // Plugin directories from the environment would load despite the
+      // disabled `enabledPlugins` above.
+      CLAUDE_CODE_PLUGIN_DIRS: undefined,
       // Client-managed LLM routing: `providers/set` config wins, else the
       // legacy gateway auth request. Routing is baked into the query at
       // creation; provider updates recreate loaded queries between turns.
@@ -11769,11 +11779,12 @@ export class ClaudeAcpAgent {
       // for clients that negotiated per-turn file-change reports; this avoids
       // snapshot I/O for every other session.
       ...(fileChangeReporter ? { enableFileCheckpointing: true } : {}),
-      ...(settings && { settings }),
+      settings,
       env,
       // Override certain fields that must be controlled by ACP
       cwd: params.cwd,
       includePartialMessages: true,
+      plugins: [],
       forwardSubagentText,
       mcpServers: {
         ...(userProvidedOptions?.mcpServers || {}),
@@ -11803,7 +11814,7 @@ export class ClaudeAcpAgent {
         : {}),
       pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_EXECUTABLE ?? (await claudeCliPath()),
       extraArgs: {
-        ...userProvidedOptions?.extraArgs,
+        ...withoutPluginDirArg(userProvidedOptions?.extraArgs),
         "replay-user-messages": "",
       },
       disallowedTools: [...(userProvidedOptions?.disallowedTools || []), ...disallowedTools],
