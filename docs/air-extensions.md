@@ -515,6 +515,17 @@ While the adapter does not know the path, a report carries no `planFilePath` key
 The adapter never sends a blank path, because AIR reads a present non-file value as a retraction.
 Without `rawInputRendering`, a `planFile` client gets no copy of the plan in `content` either.
 
+### Approved plan identity
+
+For an AIR client with plan operations, the approved plan ID is `plan-mode:<tool-call ID>`.
+Claude uses the SDK tool-call ID of ExitPlanMode.
+Each review keeps its own plan. Repeated updates of that review keep the same plan ID.
+AIR joins the plan to its review by ID, even when the text includes user edits.
+This link needs no extra metadata.
+The live result, history replay, and clear-context approval use the same identity.
+The identity does not depend on `planFile`: it also applies when the request carries inline plan text.
+Other clients keep the `plan-mode` ID.
+
 ### Fallback
 
 The plan text goes out as before in these cases:
@@ -1558,7 +1569,7 @@ It is idempotent, and an unknown id also returns `{}`.
 `session/delete`:
 
 - a `sessionIndex` client: deletes every transcript of the session (empty ones too) and every `<sessionId>/` directory, also one left without a transcript by an earlier failed delete. Anything left behind fails the request. A session that runs here is closed first. As with the CLI, the session is deleted also when another Claude Code process has it open. An unknown session is `-32002`.
-- an AIR client without `sessionIndex`: archives the session instead of deleting it (the title records of [Archive](#archive)), because AIR uses delete for "Done" and can reopen the session. A session that runs here is closed first. The list hides archived sessions from such a client too: those whose custom title, as the SDK list reports it, is archived. A session without a transcript fails with the error of the SDK delete, as before.
+- an AIR client without `sessionIndex`: archives the session instead of deleting it (the title records of [Archive](#archive)), because AIR uses delete for "Done" and can reopen the session. A session that runs here is closed first. The list hides archived sessions from such a client too: those whose custom title, as the SDK list reports it, is archived. A session without a transcript has nothing to archive, so the delete succeeds, as ACP asks of a session that does not exist.
   A `sessionIndex` client sees such a session as archived (`archived: true`), as AIR's native Claude path does.
 - any other client: the SDK delete. A session without a transcript (unknown, deleted before, or
   never prompted) succeeds, as ACP asks.
@@ -1668,14 +1679,14 @@ For AIR, both forms carry `_meta.jetbrains.air.contextCompaction`:
 }
 ```
 
-| Field        | Meaning                                                               |
-| ------------ | --------------------------------------------------------------------- |
-| `version`    | Must equal `1`.                                                       |
-| `trigger`    | `manual` or `automatic`.                                              |
-| `preTokens`  | The context size before the compaction.                               |
-| `postTokens` | The context size after the compaction.                                |
-| `durationMs` | The duration of the compaction.                                       |
-| `error`      | The error of a failed compaction. Only the tool call form carries it. |
+| Field        | Meaning                                                                                                  |
+| ------------ | -------------------------------------------------------------------------------------------------------- |
+| `version`    | Must equal `1`.                                                                                          |
+| `trigger`    | `manual`, `automatic`, or `idle`: the adapter compacted an idle session before its prompt cache expired. |
+| `preTokens`  | The context size before the compaction.                                                                  |
+| `postTokens` | The context size after the compaction.                                                                   |
+| `durationMs` | The duration of the compaction.                                                                          |
+| `error`      | The error of a failed compaction. Only the tool call form carries it.                                    |
 
 The standard `toolCallId` or `compactionId` and the `status` own the identity and the phase.
 The `compaction_update` form puts the error in the standard `error` field.

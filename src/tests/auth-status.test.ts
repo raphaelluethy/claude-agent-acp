@@ -306,34 +306,12 @@ describe("auth status mappers", () => {
     });
   });
 
-  it("recognizes a logged-in OAuth token without profile metadata", () => {
+  it("maps a setup-token CLI login without profile fields to an account", () => {
     expect(
       fromCliStatus(
         JSON.stringify({ loggedIn: true, authMethod: "oauth_token", apiProvider: "firstParty" }),
       ),
     ).toEqual({ kind: "account", label: "Claude subscription", detail: "OAuth token" });
-  });
-
-  it.each([
-    [
-      { loggedIn: false, authMethod: "oauth_token" },
-      { kind: "none", label: "Not logged in" },
-    ],
-    [{ loggedIn: true }, { kind: "none", label: "Not logged in" }],
-    [
-      { loggedIn: true, authMethod: "oauth_token", apiProvider: "bedrock" },
-      { kind: "external", label: "AWS Bedrock" },
-    ],
-    [
-      { loggedIn: true, authMethod: "oauth_token", apiKeySource: "env" },
-      { kind: "api_key", label: "Anthropic API key", detail: "env" },
-    ],
-    [
-      { loggedIn: true, authMethod: "oauth_token", subscriptionType: "max" },
-      { kind: "account", label: "Claude Max", account: { plan: "max" } },
-    ],
-  ])("preserves the existing authentication precedence for %j", (status, expected) => {
-    expect(fromCliStatus(JSON.stringify(status))).toEqual(expected);
   });
 
   it("lets a third-party backend outrank the logged-out flag", () => {

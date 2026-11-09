@@ -36,6 +36,23 @@ To try changes that have landed on `main` but are not released yet, install from
 npm install @agentclientprotocol/claude-agent-acp@preview
 ```
 
+### Standalone executables
+
+Each release attaches archives for Linux (glibc and musl), macOS and Windows, on
+x64 and arm64, to its [GitHub release](https://github.com/agentclientprotocol/claude-agent-acp/releases).
+They need no Node.js install. Each holds two files: `claude-agent-acp`, and the
+Claude CLI (`claude`) it runs. Keep them in the same directory; a symlink to
+`claude-agent-acp` elsewhere works. To use a Claude CLI you already have
+instead, set `CLAUDE_CODE_EXECUTABLE`. On Alpine, install `libgcc` and
+`libstdc++` first.
+
+To build one for your machine (needs [Bun](https://bun.sh)) and check it:
+
+```sh
+npm run build:binary
+npm run smoke:binary            # add `-- --full` to drive a real session; needs a Claude login
+```
+
 ### Subagent sessions
 
 A client that declares `clientCapabilities.subagents`, other than JetBrains AIR, gets each Agent or
@@ -48,6 +65,14 @@ Task subagent as its own child session, following the [subagents RFD](https://gi
   `end_turn` or `cancelled` when the SDK gives the reason. A failure is `idle` with the `error`
   stop reason and the SDK's error text as its `error`. The child keeps its session for every
   delegation to it.
+- A child that runs outside its parent's working directory, such as an Agent call with
+  `isolation: "worktree"`, gets its `cwd` on `subagent_update` before its first tool call. The
+  adapter takes it from the `cwd` of the child's own hooks: its SubagentStart hook runs before its
+  first model request. It sends `cwd: null` when the child is back in its parent's directory. A
+  child in its parent's directory gets no `cwd`, and no child gets `additionalDirectories`: Claude
+  Code gives a subagent the session's additional directories, so it inherits them. A replay
+  announces a child with the `cwd` that its transcript recorded, and clears it after the response
+  when that directory no longer exists.
 - Session messages replace the Agent or Task call that launches the child, which its parent is
   not shown:
   - The launch's prompt is a `session_message` in both transcripts: the parent's outgoing view and
